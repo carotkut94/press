@@ -19,13 +19,16 @@ import com.badoo.reaktive.observable.ofType
 import com.badoo.reaktive.observable.publish
 import com.badoo.reaktive.observable.take
 import com.badoo.reaktive.observable.takeUntil
+import com.badoo.reaktive.observable.takeWhile
 import com.badoo.reaktive.observable.withLatestFrom
 import com.badoo.reaktive.observable.wrap
 import me.saket.press.PressDatabase
 import me.saket.press.data.shared.Note
 import me.saket.press.shared.db.NoteId
 import me.saket.press.shared.editor.EditorEvent.ArchiveToggleClicked
+import me.saket.press.shared.editor.EditorEvent.CloseSubMenu
 import me.saket.press.shared.editor.EditorEvent.CopyAsClicked
+import me.saket.press.shared.editor.EditorEvent.DeleteNoteClicked
 import me.saket.press.shared.editor.EditorEvent.DuplicateNoteClicked
 import me.saket.press.shared.editor.EditorEvent.NoteTextChanged
 import me.saket.press.shared.editor.EditorEvent.ShareAsClicked
@@ -40,6 +43,7 @@ import me.saket.press.shared.editor.TextFormat.Markdown
 import me.saket.press.shared.editor.TextFormat.RichText
 import me.saket.press.shared.editor.ToolbarIconKind.Archive
 import me.saket.press.shared.editor.ToolbarIconKind.CopyAs
+import me.saket.press.shared.editor.ToolbarIconKind.DeleteNote
 import me.saket.press.shared.editor.ToolbarIconKind.DuplicateNote
 import me.saket.press.shared.editor.ToolbarIconKind.OpenInSplitScreen
 import me.saket.press.shared.editor.ToolbarIconKind.ShareAs
@@ -56,6 +60,8 @@ import me.saket.press.shared.rx.mapToOneOrNull
 import me.saket.press.shared.rx.observableInterval
 import me.saket.press.shared.rx.withLatestFrom
 import me.saket.press.shared.syncer.SyncMergeConflicts
+import me.saket.press.shared.syncer.Syncer
+import me.saket.press.shared.syncer.Syncer.Status.Enabled
 import me.saket.press.shared.syncer.git.DeviceInfo
 import me.saket.press.shared.syncer.git.FolderPaths
 import me.saket.press.shared.time.Clock
@@ -69,6 +75,7 @@ class EditorPresenter(
   val args: Args,
   private val clock: Clock,
   private val database: PressDatabase,
+  private val syncer: Syncer,
   private val schedulers: Schedulers,
   private val strings: Strings,
   private val config: EditorConfig,
@@ -104,6 +111,7 @@ class EditorPresenter(
           handleArchiveClicks(events, noteStream),
           handleShareClicks(events),
           handleDuplicateNoteClicks(events, noteStream),
+          handleDeleteNoteClicks(events, noteStream),
           handleSplitScreenClicks(events, noteStream),
           handleCopyClicks(events),
           populateExistingNoteOnStart(noteStream),
@@ -195,9 +203,10 @@ class EditorPresenter(
     val isNoteArchived = noteStream.map { it.folderId }
       .distinctUntilChanged()
       .map(folderPaths::isArchived)
+      .combineLatestWith(syncer.status())
       .distinctUntilChanged()
 
-    return isNoteArchived.map { isArchived ->
+    return isNoteArchived.map { (isArchived, syncStatus) ->
       listOfNotNull(
         if (isArchived) {
           ToolbarMenuAction(
@@ -258,6 +267,25 @@ class EditorPresenter(
             label = strings.editor.menu_open_in_split_screen,
             icon = OpenInSplitScreen,
             clickEvent = SplitScreenClicked
+          )
+        } else null,
+        if (syncStatus is Enabled) {
+          ToolbarSubMenu(
+            label = strings.editor.menu_delete_note,
+            subMenuTitle = strings.editor.menu_delete_note_confirmation_title,
+            icon = DeleteNote,
+            children = listOf(
+              ToolbarMenuAction(
+                label = strings.editor.menu_delete_note_confirm,
+                icon = DeleteNote,
+                clickEvent = CloseSubMenu,
+              ),
+              ToolbarMenuAction(
+                label = strings.editor.menu_delete_note_cancel,
+                icon = DeleteNote,
+                clickEvent = DeleteNoteClicked,
+              )
+            )
           )
         } else null,
       )
@@ -359,6 +387,20 @@ class EditorPresenter(
         args.navigator.lfg(
           EditorScreenKey(NewNote(PreSavedNoteId(newNoteId)))
         )
+      }
+  }
+
+  private fun handleDeleteNoteClicks(
+    events: Observable<EditorEvent>,
+    noteStream: Observable<Note>
+  ): Observable<EditorUiModel> {
+
+    return events.ofType<DeleteNoteClicked>()
+      .withLatestFrom(noteStream)
+      .observeOn(schedulers.io)
+      .consumeOnNext { (_, note) ->
+        noteQueries.markAsPendingDeletion(note.id)  // Will get deleted on next sync.
+        args.navigator.goBack()
       }
   }
 

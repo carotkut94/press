@@ -5,6 +5,7 @@ import android.graphics.Color.BLACK
 import android.text.Html
 import android.text.Html.FROM_HTML_MODE_LEGACY
 import android.view.MotionEvent
+import android.view.MotionEvent.ACTION_MOVE
 import androidx.core.view.doOnLayout
 import androidx.core.view.updatePadding
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -12,7 +13,6 @@ import com.squareup.contour.ContourLayout
 import me.saket.inboxrecyclerview.InboxRecyclerView
 import me.saket.inboxrecyclerview.dimming.DimPainter
 import me.saket.inboxrecyclerview.expander.InboxItemExpander
-import me.saket.inboxrecyclerview.page.ExpandablePageLayout
 import me.saket.press.R
 import me.saket.press.shared.localization.strings
 import me.saket.press.shared.preferences.PreferenceCategory.AboutApp
@@ -21,8 +21,6 @@ import me.saket.press.shared.preferences.PreferenceCategory.Sync
 import me.saket.press.shared.preferences.PreferenceCategoryItemModel
 import me.saket.press.shared.preferences.PreferenceCategoryScreenKey
 import me.saket.press.shared.ui.ScreenKey
-import press.extensions.findParentOfType
-import press.extensions.interceptPullToCollapseOnView
 import press.navigation.navigator
 import press.navigation.transitions.ExpandableScreenHost
 import press.theme.themeAware
@@ -94,18 +92,12 @@ class PreferencesView(context: Context) : ContourLayout(context), ExpandableScre
     )
   }
 
-  override fun onAttachedToWindow() {
-    super.onAttachedToWindow()
-
-    val page = findParentOfType<ExpandablePageLayout>()
-    page?.pullToCollapseInterceptor = interceptPullToCollapseOnView(categoryList)
-  }
-
   override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
     // The note list is positioned in front of the toolbar so that its items can go
     // over it, but RV steals all touch events even if there isn't a child under to
     // receive the event.
-    return if (ev.y > toolbar.y && ev.y < (toolbar.y + toolbar.height)) {
+    // TODO: draw dimming inside NavigationHostLayout and get rid of this hack.
+    return if (ev.action != ACTION_MOVE && ev.y > toolbar.y && ev.y < (toolbar.y + toolbar.height)) {
       toolbar.dispatchTouchEvent(ev)
     } else {
       super.dispatchTouchEvent(ev)

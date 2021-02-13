@@ -1,5 +1,6 @@
 package press.navigation
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.Intent.ACTION_SEND
@@ -29,7 +30,7 @@ import press.widgets.ThemeAwareActivity
 
 open class TheActivity : ThemeAwareActivity(), HasNavigator {
   override lateinit var navigator: Navigator
-  private val navHostView by unsafeLazy { FrameLayout(this) }
+  private val navHostView by unsafeLazy { NavigationHostLayout(this) }
 
   companion object {
     private const val KEY_INITIAL_SCREEN = "initial_screen"
@@ -120,6 +121,7 @@ private class HideKeyboardOnScreenChange : ScreenTransition {
     goingForward: Boolean,
     onComplete: () -> Unit
   ): TransitionResult {
+    @SuppressLint("WrongConstant")
     if (toView.focusSearch(View.FOCUS_FORWARD) !is EditText) {
       toView.hideKeyboard()
     }

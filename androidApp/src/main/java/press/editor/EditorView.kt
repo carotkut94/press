@@ -36,8 +36,8 @@ import io.reactivex.rxkotlin.Observables
 import io.reactivex.schedulers.Schedulers
 import me.saket.cascade.CascadePopupMenu
 import me.saket.cascade.overrideAllPopupMenus
-import me.saket.inboxrecyclerview.page.ExpandablePageLayout
 import me.saket.press.R
+import me.saket.press.shared.editor.EditorEvent.CloseSubMenu
 import me.saket.press.shared.editor.EditorEvent.NoteTextChanged
 import me.saket.press.shared.editor.EditorOpenMode.NewNote
 import me.saket.press.shared.editor.EditorPresenter
@@ -50,6 +50,7 @@ import me.saket.press.shared.editor.EditorUiEffect.UpdateNoteText
 import me.saket.press.shared.editor.EditorUiModel
 import me.saket.press.shared.editor.ToolbarIconKind.Archive
 import me.saket.press.shared.editor.ToolbarIconKind.CopyAs
+import me.saket.press.shared.editor.ToolbarIconKind.DeleteNote
 import me.saket.press.shared.editor.ToolbarIconKind.DuplicateNote
 import me.saket.press.shared.editor.ToolbarIconKind.OpenInSplitScreen
 import me.saket.press.shared.editor.ToolbarIconKind.ShareAs
@@ -57,8 +58,9 @@ import me.saket.press.shared.editor.ToolbarIconKind.Unarchive
 import me.saket.press.shared.editor.ToolbarMenuAction
 import me.saket.press.shared.editor.ToolbarMenuItem
 import me.saket.press.shared.editor.ToolbarSubMenu
-import me.saket.press.shared.saveEditorContentOnClose
+import me.saket.press.shared.listenRx
 import me.saket.press.shared.preferences.UserPreferences
+import me.saket.press.shared.saveEditorContentOnClose
 import me.saket.press.shared.theme.AppTheme
 import me.saket.press.shared.theme.DisplayUnits
 import me.saket.press.shared.theme.TextStyles.mainBody
@@ -66,7 +68,6 @@ import me.saket.press.shared.theme.TextView
 import me.saket.press.shared.theme.ThemePalette
 import me.saket.press.shared.theme.applyStyle
 import me.saket.press.shared.theme.from
-import me.saket.press.shared.listenRx
 import me.saket.press.shared.ui.models
 import me.saket.wysiwyg.Wysiwyg
 import me.saket.wysiwyg.formatting.TextSelection
@@ -74,10 +75,8 @@ import me.saket.wysiwyg.parser.node.HeadingLevel.H1
 import me.saket.wysiwyg.style.WysiwygStyle
 import me.saket.wysiwyg.widgets.addTextChangedListener
 import press.extensions.doOnTextChange
-import press.extensions.findParentOfType
 import press.extensions.fromOreo
 import press.extensions.getDrawable
-import press.extensions.interceptPullToCollapseOnView
 import press.extensions.showKeyboard
 import press.extensions.textColor
 import press.extensions.textSizePx
@@ -196,9 +195,6 @@ class EditorView @InflationInject constructor(
   override fun onAttachedToWindow() {
     super.onAttachedToWindow()
 
-    val page = findParentOfType<ExpandablePageLayout>()
-    page?.pullToCollapseInterceptor = interceptPullToCollapseOnView(scrollView)
-
     editorEditText.doOnTextChange {
       presenter.dispatch(NoteTextChanged(it.toString()))
     }
@@ -261,18 +257,18 @@ class EditorView @InflationInject constructor(
   }
 
   private fun renderToolbarMenu(items: List<ToolbarMenuItem>, palette: ThemePalette) {
-    toolbar.menu.clear()
-    for (item in items) {
-      item.addToMenu(toolbar.menu, palette)
-    }
-
     toolbar.overflowIcon!!.setTint(palette.accentColor)
     toolbar.overrideAllPopupMenus { context, anchor ->
-      CascadePopupMenu(context, anchor, styler = pressCascadeStyler(palette))
+      CascadePopupMenu(context, anchor, styler = pressCascadeStyler(palette)).also {
+        toolbar.menu.clear()
+        for (item in items) {
+          item.addToMenu(toolbar.menu, palette, cascade = it)
+        }
+      }
     }
   }
 
-  private fun ToolbarMenuItem.addToMenu(menu: Menu, palette: ThemePalette) {
+  private fun ToolbarMenuItem.addToMenu(menu: Menu, palette: ThemePalette, cascade: CascadePopupMenu) {
     val item: ToolbarMenuItem = this
     val iconRes = when (item.icon) {
       Archive -> R.drawable.ic_twotone_archive_24
@@ -281,6 +277,7 @@ class EditorView @InflationInject constructor(
       CopyAs -> R.drawable.ic_twotone_file_copy_24
       DuplicateNote -> R.drawable.ic_twotone_note_add_24
       OpenInSplitScreen -> R.drawable.ic_twotone_vertical_split_24
+      DeleteNote -> R.drawable.ic_twotone_delete_24
       null -> null
     }
     val icon = iconRes?.let { context.getDrawable(iconRes, palette.accentColor) }
@@ -288,14 +285,17 @@ class EditorView @InflationInject constructor(
     val menuItem = when (item) {
       is ToolbarMenuAction -> {
         menu.add(item.label).setOnMenuItemClickListener {
-          if (item.clickEvent != null) presenter.dispatch(item.clickEvent!!)
-          else Toast.makeText(context, "Work in progress", LENGTH_SHORT).show()
+          when (item.clickEvent) {
+            is CloseSubMenu -> cascade.navigateBack()
+            else -> presenter.dispatch(item.clickEvent)
+          }
           true
         }
       }
       is ToolbarSubMenu -> {
         val subMenu = menu.addSubMenu(item.label)
-        item.children.forEach { it.addToMenu(subMenu, palette) }
+        subMenu.setHeaderTitle(item.subMenuTitle)
+        item.children.forEach { it.addToMenu(subMenu, palette, cascade) }
         subMenu.item
       }
     }
